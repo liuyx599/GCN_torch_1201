@@ -12,6 +12,7 @@ import torch.optim as optim
 from utils import load_data, accuracy
 from models import GCN
 
+
 # Training settings
 parser = argparse.ArgumentParser()
 parser.add_argument('--no-cuda', action='store_true', default=False,
@@ -29,7 +30,7 @@ parser.add_argument('--hidden', type=int, default=16,
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
-parser.add_argument('--alpha', type=float, default=0.3,
+parser.add_argument('--alpha', type=float, default=0.25,
                     help='two-order adj loss penalty coefficient')
 
 args = parser.parse_args()
@@ -40,6 +41,7 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
+
 # Load data
 adj, adj2, features, labels, idx_train, idx_val, idx_test = load_data()
 
@@ -48,8 +50,10 @@ model = GCN(nfeat=features.shape[1],
             nhid=args.hidden,
             nclass=labels.max().item() + 1,
             dropout=args.dropout)
+
 optimizer = optim.Adam(model.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
+
 
 if args.cuda:
     model.cuda()
@@ -66,11 +70,16 @@ def train(epoch, alpha):
     t = time.time()
     model.train()
     optimizer.zero_grad()
+
     output = model(features, adj)
+    loss_train = F.nll_loss(output[idx_train], labels[idx_train])
+
     output2 = model(features, adj2)
-    loss_train = F.nll_loss(output[idx_train], labels[idx_train]) + \
-                 alpha * F.nll_loss(output2[idx_train], labels[idx_train])
+    loss_train2 = F.nll_loss(output2[idx_train], labels[idx_train])
+
+    loss_train = loss_train + alpha * loss_train2
     acc_train = accuracy(output[idx_train], labels[idx_train])
+
     loss_train.backward()
     optimizer.step()
 
@@ -90,7 +99,7 @@ def train(epoch, alpha):
           'time: {:.4f}s'.format(time.time() - t))
 
 
-def test():
+def test(acc_results, loss_results):
     model.eval()
     output = model(features, adj)
     loss_test = F.nll_loss(output[idx_test], labels[idx_test])
@@ -99,13 +108,35 @@ def test():
           "loss= {:.4f}".format(loss_test.item()),
           "accuracy= {:.4f}".format(acc_test.item()))
 
+    acc_results.append(":.4f".format(acc_test.item()))
+    loss_results.append("{:.4f}".format(loss_test.item()))
 
-# Train model
-t_total = time.time()
-for epoch in range(args.epochs):
-    train(epoch, alpha=args.alpha)
-print("Optimization Finished!")
-print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 
-# Testing
-test()
+acc_results = []
+loss_results = []
+time_results = []
+for i in range(10):
+
+    # Train model
+    t_total = time.time()
+    for epoch in range(args.epochs):
+        train(epoch, alpha=args.alpha)
+    print("Optimization Finished!")
+    print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+    time_results.append("{:.4f}".format(time.time() - t_total))
+    # Testing
+    test(acc_results, loss_results)
+
+
+f1 = open("acc_results", "w")
+f1.write("\n".join(acc_results))
+
+f2 = open("loss_results", "w")
+f2.write("\n".join(loss_results))
+
+f3 = open("time_results", "w")
+f3.write("\n".join(time_results))
+
+f1.close()
+f2.close()
+f3.close()
